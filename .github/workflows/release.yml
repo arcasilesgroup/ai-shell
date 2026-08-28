@@ -53,15 +53,31 @@ jobs:
           node-version: 22
       - run: npm ci --ignore-scripts
 
-      # The publish script builds first: `files: ["dist"]` means an empty dist
-      # would publish an empty package. `changeset publish` then skips packages
-      # whose version already matches the registry, so a version-PR-only push
-      # creates the release and nothing else.
-      - uses: changesets/action@8488615a623b1b9c987934bb89eae8af6a946ac1 # v2.1.1
+      # The action runs publish-script WITHOUT a shell: the command string is
+      # split into argv, so `npm run build && npx changeset publish` ran as
+      # `npm run build "&&" "npx" "changeset" "publish"` — the extra tokens
+      # were swallowed as script arguments (runner banner:
+      # `> pkgroll && npx changeset publish`), `changeset publish` never
+      # executed, and with ignoreReturnCode the job reported success having
+      # published nothing. Build in its own step; keep publish-script a
+      # single command.
+      - run: npm run build
+      - name: release
+        id: release
+        uses: changesets/action@8488615a623b1b9c987934bb89eae8af6a946ac1 # v2.1.1
         with:
           version-script: npx changeset version
-          publish-script: npm run build && npx changeset publish
+          publish-script: npx changeset publish
           commit-message: 'chore: version packages'
           pr-title: 'chore: version packages'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # Fail closed (constitution 11/12): a green release job whose package
+      # version never reached the registry is a lie. The published tarball
+      # must exist for the version in package.json.
+      - name: the version in package.json must exist on npm
+        run: |
+          v="$(node -p "require('./package.json').version")"
+          npm view "@arcasilesgroup/ai-shell@$v" version
+          echo "npm has @arcasilesgroup/ai-shell@$v"
