@@ -47,9 +47,11 @@ export async function getScriptAndInfo({
     model,
     apiEndpoint,
   });
+  // The SDK stream can be iterated exactly once. The explanation always
+  // comes from a second request (see explainInSecondRequest), so this only
+  // hands out one reader.
   return {
-    readScript: readData(stream, ...shellCodeExclusions),
-    readInfo: readData(stream, ...shellCodeExclusions),
+    readScript: readData(stream, apiEndpoint, ...shellCodeExclusions),
   };
 }
 
@@ -82,50 +84,57 @@ export async function generateCompletion({
 
     return completion;
   } catch (err) {
-    if (err instanceof APIConnectionError) {
-      throw new KnownError(
-        `Error connecting to ${apiEndpoint}. Is the endpoint reachable and are you connected to the internet?\n${err.message}`
-      );
-    }
+    throw normalizeCompletionError(err, apiEndpoint);
+  }
+}
 
-    if (err instanceof APIError) {
-      const messageString = err.error
-        ? JSON.stringify(err.error, null, 2)
-        : err.message;
-      if (err.status === 429) {
-        throw new KnownError(
-          dedent`
-          Request failed with status 429 (rate limit or quota exceeded). This is usually due to an incorrect billing setup or excessive quota usage at your provider.
+// Maps a failure — request-time or mid-stream — into a KnownError with an
+// actionable message. Shared by generateCompletion and readData so every
+// caller of the stream sees the same error contract.
+function normalizeCompletionError(err: unknown, apiEndpoint: string): unknown {
+  if (err instanceof APIConnectionError) {
+    return new KnownError(
+      `Error connecting to ${apiEndpoint}. Is the endpoint reachable and are you connected to the internet?\n${err.message}`
+    );
+  }
 
-          Check your API key and plan at the provider configured in API_ENDPOINT.
-
-          Full message from the API:
-        ` +
-            '\n\n' +
-            messageString +
-            '\n'
-        );
-      }
-      const authHint =
-        err.status === 401
-          ? '\n' +
-            'Your API key does not match this endpoint. The key may belong to a different provider.\n' +
-            `Current endpoint: ${apiEndpoint}\n` +
-            'Fix it with `ai config` (provider setup) or set API_ENDPOINT in ~/.ai-shell.'
-          : '';
-      throw new KnownError(
+  if (err instanceof APIError) {
+    const messageString = err.error
+      ? JSON.stringify(err.error, null, 2)
+      : err.message;
+    if (err.status === 429) {
+      return new KnownError(
         dedent`
-        Request to the API failed with status ${err.status}:
+        Request failed with status 429 (rate limit or quota exceeded). This is usually due to an incorrect billing setup or excessive quota usage at your provider.
+
+        Check your API key and plan at the provider configured in API_ENDPOINT.
+
+        Full message from the API:
       ` +
           '\n\n' +
           messageString +
-          authHint +
           '\n'
       );
     }
-
-    throw err instanceof Error ? new KnownError(err.message) : err;
+    const authHint =
+      err.status === 401
+        ? '\n' +
+          'Your API key does not match this endpoint. The key may belong to a different provider.\n' +
+          `Current endpoint: ${apiEndpoint}\n` +
+          'Fix it with `ai config` (provider setup) or set API_ENDPOINT in ~/.ai-shell.'
+        : '';
+    return new KnownError(
+      dedent`
+      Request to the API failed with status ${err.status}:
+    ` +
+        '\n\n' +
+        messageString +
+        authHint +
+        '\n'
+    );
   }
+
+  return err instanceof Error ? new KnownError(err.message) : err;
 }
 
 // Minimal non-streaming completion used by `ai config test` and the wizard.
@@ -178,7 +187,7 @@ export async function getExplanation({
     model,
     apiEndpoint,
   });
-  return { readExplanation: readData(stream) };
+  return { readExplanation: readData(stream, apiEndpoint) };
 }
 
 export async function getRevision({
@@ -203,17 +212,18 @@ export async function getRevision({
     apiEndpoint,
   });
   return {
-    readScript: readData(stream, ...shellCodeExclusions),
+    readScript: readData(stream, apiEndpoint, ...shellCodeExclusions),
   };
 }
 
 export const readData =
   (
     chunkStream: AsyncIterable<ChatCompletionChunk>,
+    apiEndpoint: string,
     ...excluded: (RegExp | string | undefined)[]
   ) =>
   (writer: (data: string) => void): Promise<string> => {
-    const { promise, resolve } = Promise.withResolvers<string>();
+    const { promise, resolve, reject } = Promise.withResolvers<string>();
 
     (async () => {
       let stopTextStream = false;
@@ -228,41 +238,54 @@ export const readData =
         input: process.stdin,
       });
 
-      process.stdin.setRawMode(true);
-
-      process.stdin.on('keypress', (_key, keyData) => {
-        if (stopTextStreamKeys.includes(keyData.name)) {
+      const onKeyPress = (_key: unknown, keyData: { name?: string }) => {
+        if (stopTextStreamKeys.includes(keyData?.name ?? '')) {
           stopTextStream = true;
         }
-      });
+      };
 
-      for await (const chunk of chunkStream) {
-        if (stopTextStream) {
-          break;
-        }
-        const content = chunk.choices[0]?.delta?.content ?? '';
+      process.stdin.setRawMode(true);
+      process.stdin.on('keypress', onKeyPress);
 
-        if (!dataStart) {
-          buffer += content;
-          if (buffer.match(excludedPrefix ?? '')) {
-            dataStart = true;
-            buffer = '';
-            // The delta that completes the opening fence is not part of the
-            // output. With no marker to wait for, write it through.
-            if (excludedPrefix) continue;
+      try {
+        for await (const chunk of chunkStream) {
+          if (stopTextStream) {
+            break;
+          }
+          const content = chunk.choices[0]?.delta?.content ?? '';
+
+          if (!dataStart) {
+            buffer += content;
+            if (buffer.match(excludedPrefix ?? '')) {
+              dataStart = true;
+              buffer = '';
+              // The delta that completes the opening fence is not part of the
+              // output. With no marker to wait for, write it through.
+              if (excludedPrefix) continue;
+            }
+          }
+
+          if (dataStart && content) {
+            const contentWithoutExcluded = stripRegexPatterns(
+              content,
+              excluded
+            );
+
+            data += contentWithoutExcluded;
+            writer(contentWithoutExcluded);
           }
         }
-
-        if (dataStart && content) {
-          const contentWithoutExcluded = stripRegexPatterns(content, excluded);
-
-          data += contentWithoutExcluded;
-          writer(contentWithoutExcluded);
-        }
+        resolve(data);
+      } catch (err) {
+        // A mid-stream failure (provider error event, dropped connection)
+        // must reach the caller. Swallowing it here left the promise unsettled
+        // forever: the UI hung on a spinner and clack's global
+        // unhandled-rejection handler printed "Something went wrong".
+        reject(normalizeCompletionError(err, apiEndpoint));
+      } finally {
+        process.stdin.removeListener('keypress', onKeyPress);
+        rl.close();
       }
-
-      rl.close();
-      resolve(data);
     })();
 
     return promise;
