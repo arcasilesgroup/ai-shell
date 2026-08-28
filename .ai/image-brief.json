@@ -1,0 +1,44 @@
+{
+  "goal": "Create the README banner / social preview for AI Shell, a CLI that turns natural language into shell commands",
+  "asset_kind": "wide banner, text-free, for GitHub README and repo social preview",
+  "subject": "A calm editorial scene: a floating dark terminal window drawn as a simple rounded slab whose content is ONLY abstract horizontal glowing amber bars of varying length, like redacted text lines — absolutely no letters, no glyphs, no punctuation, no code characters anywhere; a small artichoke-green sprout shape as a quiet accent on a warm paper background",
+  "composition": "Asymmetric: visual weight right-of-center, generous quiet space on the left for future title overlay; horizon low",
+  "style": [
+    "editorial minimal",
+    "flat geometric",
+    "soft directional light",
+    "warm analog paper texture"
+  ],
+  "brand_tokens": [
+    "paper #faf9f7",
+    "warm black #272727",
+    "amber #f9be4a",
+    "artichoke green #7fbf80",
+    "deep blue #114F82"
+  ],
+  "must_include": [
+    "one protagonist color accent (amber)",
+    "generous whitespace",
+    "restrained and solid, no gradient soup",
+    "terminal content as plain glowing bars only"
+  ],
+  "avoid": [
+    "text",
+    "letters",
+    "characters",
+    "glyphs",
+    "code snippets",
+    "logos",
+    "UI screenshots",
+    "dashboard mockups",
+    "neon cyberpunk cliches",
+    "robot faces",
+    "hex color codes",
+    "edge stripes glued to card borders"
+  ],
+  "notes": "No decorative particles, no lens flares. Should feel like a print poster for a serious tool community, not a startup landing page.",
+  "size": "1536x512",
+  "n": 4,
+  "guidance": 3.5,
+  "references": []
+}
