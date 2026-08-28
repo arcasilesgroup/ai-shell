@@ -1,0 +1,67 @@
+name: release
+
+# The release loop, in the open-source standard shape (changesets):
+#
+#   PR with a .changeset/ file  ->  merged to main
+#   this workflow               ->  opens/updates a "chore: version packages" PR
+#   that PR merged              ->  same workflow publishes to npm and creates
+#                                   the GitHub release + tag
+#
+# No NPM_TOKEN exists anywhere. The publish uses npm OIDC trusted publishing:
+# this repo + this workflow file + the "npm" environment are registered once as
+# a trusted publisher on npmjs.com, and package.json's
+# publishConfig.provenance attaches a signed build attestation to every
+# version. A long-lived token on a laptop cannot publish, and there is no
+# repository secret to steal.
+#
+# The "npm" environment is also the human gate: add required reviewers on it in
+# repo settings and a release waits for a person before it reaches the
+# registry.
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-main
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: npm
+    permissions:
+      contents: write # tags + GitHub releases
+      pull-requests: write # the version PR
+      id-token: write # OIDC for npm trusted publishing + attestations
+    steps:
+      - uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          # changesets reads history to decide what changed since the last
+          # release tag; a shallow clone cannot answer that.
+          fetch-depth: 0
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: 22
+      - run: npm ci --ignore-scripts
+
+      # The publish script builds first: `files: ["dist"]` means an empty dist
+      # would publish an empty package. `changeset publish` then skips packages
+      # whose version already matches the registry, so a version-PR-only push
+      # creates the release and nothing else.
+      - uses: changesets/action@fdf536a68c4154480c89b42547f8102cf0d8bc47 # v2.1.1
+        with:
+          version-script: npx changeset version
+          publish-script: npm run build && npx changeset publish
+          commit-message: 'chore: version packages'
+          pr-title: 'chore: version packages'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

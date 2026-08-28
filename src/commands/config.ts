@@ -29,7 +29,7 @@ export default command(
       }
 
       if (mode === 'ui') {
-        await showConfigUI();
+        await showConfigUI(runProviderWizard);
         return;
       }
 

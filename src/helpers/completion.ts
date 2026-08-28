@@ -1,16 +1,11 @@
-import {
-  OpenAIApi,
-  Configuration,
-  ChatCompletionRequestMessage,
-  Model,
-} from 'openai';
+import OpenAI, { APIError, APIConnectionError } from 'openai';
+import type {
+  ChatCompletionChunk,
+  ChatCompletionMessageParam,
+} from 'openai/resources/chat/completions/completions';
 import dedent from 'dedent';
-import { IncomingMessage } from 'http';
 import { KnownError } from './error';
-import { streamToIterable } from './stream-to-iterable';
 import { detectShell } from './os-detect';
-import type { AxiosError } from 'axios';
-import { streamToString } from './stream-to-string';
 import './replace-all-polyfill';
 import i18n from './i18n';
 import { stripRegexPatterns } from './strip-regex-patterns';
@@ -18,13 +13,16 @@ import readline from 'readline';
 
 const explainInSecondRequest = true;
 
+export type { ChatCompletionMessageParam };
+
 function getApiClient(key: string, apiEndpoint: string) {
   // The `openai` SDK is used only as an OpenAI-compatible HTTP client;
   // the actual endpoint is whatever API_ENDPOINT points at.
-  return new OpenAIApi(
-    new Configuration({ apiKey: key, basePath: apiEndpoint })
-  );
+  return new OpenAI({ apiKey: key, baseURL: apiEndpoint });
 }
+
+// The SDK retries nothing by default; keep failures fast and honest.
+const requestOptions = { maxRetries: 0 } as const;
 
 // Openai outputs markdown format for code blocks. It oftne uses
 // a github style like: "```bash"
@@ -49,10 +47,9 @@ export async function getScriptAndInfo({
     model,
     apiEndpoint,
   });
-  const iterableStream = streamToIterable(stream);
   return {
-    readScript: readData(iterableStream, ...shellCodeExclusions),
-    readInfo: readData(iterableStream, ...shellCodeExclusions),
+    readScript: readData(stream, ...shellCodeExclusions),
+    readInfo: readData(stream, ...shellCodeExclusions),
   };
 }
 
@@ -63,7 +60,7 @@ export async function generateCompletion({
   model,
   apiEndpoint,
 }: {
-  prompt: string | ChatCompletionRequestMessage[];
+  prompt: string | ChatCompletionMessageParam[];
   number?: number;
   model?: string;
   key: string;
@@ -71,7 +68,7 @@ export async function generateCompletion({
 }) {
   const client = getApiClient(key, apiEndpoint);
   try {
-    const completion = await client.createChatCompletion(
+    const completion = await client.chat.completions.create(
       {
         model: model || 'gpt-4o-mini',
         messages: Array.isArray(prompt)
@@ -80,51 +77,37 @@ export async function generateCompletion({
         n: Math.min(number, 10),
         stream: true,
       },
-      { responseType: 'stream' }
+      requestOptions
     );
 
-    return completion.data as unknown as IncomingMessage;
+    return completion;
   } catch (err) {
-    const error = err as AxiosError;
-
-    if (error.code === 'ENOTFOUND') {
+    if (err instanceof APIConnectionError) {
       throw new KnownError(
-        `Error connecting to ${error.request.hostname} (${error.request.syscall}). Are you connected to the internet?`
+        `Error connecting to ${apiEndpoint}. Is the endpoint reachable and are you connected to the internet?\n${err.message}`
       );
     }
 
-    const response = error.response;
-    let message = response?.data as string | object | IncomingMessage;
-    if (response && message instanceof IncomingMessage) {
-      message = await streamToString(
-        response.data as unknown as IncomingMessage
-      );
-      try {
-        // Handle if the message is JSON. It should be but occasionally will
-        // be HTML, so lets handle both
-        message = JSON.parse(message);
-      } catch (e) {
-        // Ignore
+    if (err instanceof APIError) {
+      const messageString = err.error
+        ? JSON.stringify(err.error, null, 2)
+        : err.message;
+      if (err.status === 429) {
+        throw new KnownError(
+          dedent`
+          Request failed with status 429 (rate limit or quota exceeded). This is usually due to an incorrect billing setup or excessive quota usage at your provider.
+
+          Check your API key and plan at the provider configured in API_ENDPOINT.
+
+          Full message from the API:
+        ` +
+            '\n\n' +
+            messageString +
+            '\n'
+        );
       }
-    }
-
-    const messageString = message && JSON.stringify(message, null, 2);
-    if (response?.status === 429) {
-      throw new KnownError(
-        dedent`
-        Request failed with status 429 (rate limit or quota exceeded). This is usually due to an incorrect billing setup or excessive quota usage at your provider.
-
-        Check your API key and plan at the provider configured in API_ENDPOINT.
-
-        Full message from the API:
-      ` +
-          '\n\n' +
-          messageString +
-          '\n'
-      );
-    } else if (response && message) {
       const authHint =
-        response.status === 401
+        err.status === 401
           ? '\n' +
             'Your API key does not match this endpoint. The key may belong to a different provider.\n' +
             `Current endpoint: ${apiEndpoint}\n` +
@@ -132,7 +115,7 @@ export async function generateCompletion({
           : '';
       throw new KnownError(
         dedent`
-        Request to the API failed with status ${response?.status}:
+        Request to the API failed with status ${err.status}:
       ` +
           '\n\n' +
           messageString +
@@ -141,7 +124,7 @@ export async function generateCompletion({
       );
     }
 
-    throw error;
+    throw err instanceof Error ? new KnownError(err.message) : err;
   }
 }
 
@@ -153,29 +136,26 @@ export async function testConnection(
 ): Promise<void> {
   const client = getApiClient(key, apiEndpoint);
   try {
-    await client.createChatCompletion({
-      model,
-      messages: [{ role: 'user', content: 'ping' }],
-      max_tokens: 1,
-      stream: false,
-    });
+    await client.chat.completions.create(
+      {
+        model,
+        messages: [{ role: 'user', content: 'ping' }],
+        max_tokens: 1,
+      },
+      requestOptions
+    );
   } catch (err) {
-    const error = err as AxiosError;
-    const response = error.response;
-    if (response) {
-      let body = response.data as string | object;
-      if (body instanceof IncomingMessage) {
-        body = await streamToString(
-          response.data as unknown as IncomingMessage
-        );
-      }
+    if (err instanceof APIError) {
       throw new KnownError(
-        `HTTP ${response.status}: ${
-          typeof body === 'string' ? body : JSON.stringify(body)
+        `HTTP ${err.status}: ${
+          err.error ? JSON.stringify(err.error) : err.message
         }`
       );
     }
-    throw new KnownError(error.message);
+    if (err instanceof APIConnectionError) {
+      throw new KnownError(`Could not reach ${apiEndpoint}: ${err.message}`);
+    }
+    throw err instanceof Error ? new KnownError(err.message) : err;
   }
 }
 
@@ -198,8 +178,7 @@ export async function getExplanation({
     model,
     apiEndpoint,
   });
-  const iterableStream = streamToIterable(stream);
-  return { readExplanation: readData(iterableStream) };
+  return { readExplanation: readData(stream) };
 }
 
 export async function getRevision({
@@ -223,27 +202,27 @@ export async function getRevision({
     model,
     apiEndpoint,
   });
-  const iterableStream = streamToIterable(stream);
   return {
-    readScript: readData(iterableStream, ...shellCodeExclusions),
+    readScript: readData(stream, ...shellCodeExclusions),
   };
 }
 
 export const readData =
   (
-    iterableStream: AsyncGenerator<string, void>,
+    chunkStream: AsyncIterable<ChatCompletionChunk>,
     ...excluded: (RegExp | string | undefined)[]
   ) =>
-  (writer: (data: string) => void): Promise<string> =>
-    new Promise(async (resolve) => {
+  (writer: (data: string) => void): Promise<string> => {
+    const { promise, resolve } = Promise.withResolvers<string>();
+
+    (async () => {
       let stopTextStream = false;
       let data = '';
-      let content = '';
       let dataStart = false;
-      let buffer = ''; // This buffer will temporarily hold incoming data only for detecting the start
+      let buffer = ''; // holds incoming content only until the start marker is detected
 
       const [excludedPrefix] = excluded;
-      const stopTextStreamKeys = ['q', 'escape']; //Group of keys that stop the text stream
+      const stopTextStreamKeys = ['q', 'escape']; // keys that stop the text stream
 
       const rl = readline.createInterface({
         input: process.stdin,
@@ -251,59 +230,43 @@ export const readData =
 
       process.stdin.setRawMode(true);
 
-      process.stdin.on('keypress', (key, data) => {
-        if (stopTextStreamKeys.includes(data.name)) {
+      process.stdin.on('keypress', (_key, keyData) => {
+        if (stopTextStreamKeys.includes(keyData.name)) {
           stopTextStream = true;
         }
       });
-      for await (const chunk of iterableStream) {
-        const payloads = chunk.toString().split('\n\n');
-        for (const payload of payloads) {
-          if (payload.includes('[DONE]') || stopTextStream) {
-            dataStart = false;
-            resolve(data);
-            return;
+
+      for await (const chunk of chunkStream) {
+        if (stopTextStream) {
+          break;
+        }
+        const content = chunk.choices[0]?.delta?.content ?? '';
+
+        if (!dataStart) {
+          buffer += content;
+          if (buffer.match(excludedPrefix ?? '')) {
+            dataStart = true;
+            buffer = '';
+            // The delta that completes the opening fence is not part of the
+            // output. With no marker to wait for, write it through.
+            if (excludedPrefix) continue;
           }
+        }
 
-          if (payload.startsWith('data:')) {
-            content = parseContent(payload);
-            // Use buffer only for start detection
-            if (!dataStart) {
-              // Append content to the buffer
-              buffer += content;
-              if (buffer.match(excludedPrefix ?? '')) {
-                dataStart = true;
-                // Clear the buffer once it has served its purpose
-                buffer = '';
-                if (excludedPrefix) break;
-              }
-            }
+        if (dataStart && content) {
+          const contentWithoutExcluded = stripRegexPatterns(content, excluded);
 
-            if (dataStart && content) {
-              const contentWithoutExcluded = stripRegexPatterns(
-                content,
-                excluded
-              );
-
-              data += contentWithoutExcluded;
-              writer(contentWithoutExcluded);
-            }
-          }
+          data += contentWithoutExcluded;
+          writer(contentWithoutExcluded);
         }
       }
 
-      function parseContent(payload: string): string {
-        const data = payload.replaceAll(/(\n)?^data:\s*/g, '');
-        try {
-          const delta = JSON.parse(data.trim());
-          return delta.choices?.[0]?.delta?.content ?? '';
-        } catch (error) {
-          return `Error with JSON.parse and ${payload}.\n${error}`;
-        }
-      }
-
+      rl.close();
       resolve(data);
-    });
+    })();
+
+    return promise;
+  };
 
 function getExplanationPrompt(script: string) {
   return dedent`
@@ -365,9 +328,9 @@ function getRevisionPrompt(prompt: string, code: string) {
 export async function getModels(
   key: string,
   apiEndpoint: string
-): Promise<Model[]> {
+): Promise<OpenAI.Model[]> {
   const client = getApiClient(key, apiEndpoint);
-  const response = await client.listModels();
+  const response = await client.models.list(requestOptions);
 
-  return response.data.data.filter((model) => model.object === 'model');
+  return response.data.filter((model) => model.object === 'model');
 }

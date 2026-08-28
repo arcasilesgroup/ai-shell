@@ -9,8 +9,7 @@ import * as p from '@clack/prompts';
 import { red } from 'kolorist';
 import i18n from './i18n';
 import { getModels } from './completion';
-import { Model } from 'openai';
-import { runProviderWizard } from './providers';
+import type OpenAI from 'openai';
 
 const { hasOwnProperty } = Object.prototype;
 export const hasOwn = (object: unknown, key: PropertyKey) =>
@@ -146,7 +145,11 @@ export const setConfigs = async (keyValues: [key: string, value: string][]) => {
   await fs.writeFile(configPath, ini.stringify(config), 'utf8');
 };
 
-export const showConfigUI = async () => {
+export const showConfigUI = async (
+  // The provider wizard lives in providers.ts, which imports this module;
+  // it is passed in here so the dependency only points one way.
+  onProvider?: () => Promise<void>
+) => {
   try {
     const config = await getConfig();
     const choice = (await p.select({
@@ -209,7 +212,7 @@ export const showConfigUI = async () => {
     if (p.isCancel(choice)) return;
 
     if (choice === 'provider') {
-      await runProviderWizard();
+      await onProvider?.();
       return;
     }
 
@@ -241,7 +244,7 @@ export const showConfigUI = async () => {
       const models = await getModels(key, apiEndpoint);
       const model = (await p.select({
         message: 'Pick a model.',
-        options: models.map((m: Model) => {
+        options: models.map((m: OpenAI.Model) => {
           return { value: m.id, label: m.id };
         }),
       })) as string;
@@ -278,7 +281,7 @@ export const showConfigUI = async () => {
       i18n.setLanguage(language);
     }
     if (choice === 'cancel') return;
-    showConfigUI();
+    showConfigUI(onProvider);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.error(`\n${red('✖')} ${message}`);
