@@ -20,7 +20,10 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  AI_ENG_VERSION: '1.0.0'
+  # ai-engineering 1.0.0 is not on PyPI yet (latest there is 0.13.0, which
+  # lacks `doctor --ci`), so CI installs the exact commit the repo's
+  # .ai/config.toml pin describes. Switch to a PyPI pin when 1.0.0 ships.
+  AI_ENG_SHA: '1e803d51ce951ceeb0f8c5bf41ce9412cd0de298'
   JUST_VERSION: '1.58.0'
   GITLEAKS_VERSION: '8.30.1'
   ACTIONLINT_VERSION: '1.7.12'
@@ -54,7 +57,7 @@ jobs:
           echo "${ACTIONLINT_SHA256}  actionlint.tgz" | sha256sum -c -
           tar -xzf actionlint.tgz actionlint && sudo install actionlint /usr/local/bin/
           uv tool install "rust-just==${JUST_VERSION}"
-          uv tool install "ai-engineering==${AI_ENG_VERSION}"
+          uv tool install "ai-engineering @ git+https://github.com/arcasilesgroup/ai-engineering@${AI_ENG_SHA}"
 
       # The workflows are code, and the most attacked kind. Every action here is
       # pinned to a full commit SHA; actionlint checks what GitHub accepts.
