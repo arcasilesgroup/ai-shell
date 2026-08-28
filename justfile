@@ -11,13 +11,17 @@ build:
 lint:
     npm run lint
 
-# No unit suite yet; the smoke recipe is the contract test that exists:
-# the built binary must report its version and resolve its defaults. It runs
-# against a throwaway HOME so it never reads a developer's real key and never
-# depends on one existing.
+# The stream check is the offline regression gate for the double-consumed
+# SSE stream bug ("Something went wrong", 2026-08-28): it runs the real
+# completion helpers against a fake local SSE server, no key or network.
+# The smoke recipe is the contract test that exists: the built binary must
+# report its version and resolve its defaults. It runs against a throwaway
+# HOME so it never reads a developer's real key and never depends on one
+# existing.
 test:
     #!/usr/bin/env bash
     set -euo pipefail
+    node scripts/stream-consume.check.mjs
     tmp="$(mktemp -d)"
     printf 'API_KEY=sk-smoketest\n' > "$tmp/.ai-shell"
     HOME="$tmp" node dist/cli.mjs --version
@@ -34,7 +38,7 @@ security:
 
 counts:
     @echo 'RAN lint=1  # npm run lint (prettier + eslint) checked the whole tree'
-    @echo 'RAN tests=2  # the two smoke assertions in the `test` recipe above'
+    @echo 'RAN tests=4  # the stream-consume check plus the three smoke assertions in the `test` recipe above'
 
 check: wired build lint test security counts
 

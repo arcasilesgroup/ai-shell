@@ -92,5 +92,5 @@ async function getResponse({
     apiEndpoint,
   });
 
-  return { readResponse: readData(stream) };
+  return { readResponse: readData(stream, apiEndpoint) };
 }
