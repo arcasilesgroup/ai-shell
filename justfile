@@ -12,10 +12,17 @@ lint:
     npm run lint
 
 # No unit suite yet; the smoke recipe is the contract test that exists:
-# the built binary must report its version and read its config keys.
+# the built binary must report its version and resolve its defaults. It runs
+# against a throwaway HOME so it never reads a developer's real key and never
+# depends on one existing.
 test:
-    node dist/cli.mjs --version
-    node dist/cli.mjs config get MODEL
+    #!/usr/bin/env bash
+    set -euo pipefail
+    tmp="$(mktemp -d)"
+    printf 'API_KEY=sk-smoketest\n' > "$tmp/.ai-shell"
+    HOME="$tmp" node dist/cli.mjs --version
+    HOME="$tmp" node dist/cli.mjs config get MODEL API_ENDPOINT ICONS
+    rm -rf "$tmp"
 
 # Supply-chain guards, run locally and in CI identically.
 # `npm audit` reads the lockfile; production deps only; high and above blocks.
