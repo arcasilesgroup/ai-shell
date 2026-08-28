@@ -8,13 +8,13 @@ updates:
     groups:
       minor-and-patch:
         update-types: [minor, patch]
-    # 2.1.1 ships an exports map pointing at legacy.mjs, which is absent from
+    # 2.1.x ship an exports map pointing at legacy.mjs, which is absent from
     # the published tarball: `require('@nexssp/os/legacy')` dies with
     # ERR_MODULE_NOT_FOUND and the CLI cannot start. Re-evaluate when upstream
     # fixes the package.
     ignore:
       - dependency-name: '@nexssp/os'
-        versions: ['2.1.1']
+        versions: ['>= 2.1.0']
 
   # The workflows are dependencies too: pin-bump them in PRs, never silently.
   - package-ecosystem: github-actions
