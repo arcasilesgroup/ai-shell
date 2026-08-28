@@ -1,7 +1,7 @@
 {
   "name": "@arcasilesgroup/ai-shell",
   "description": "A CLI that converts natural language to shell commands, with any OpenAI-compatible provider.",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "module",
   "engines": {
     "node": ">=22"
