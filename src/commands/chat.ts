@@ -3,8 +3,7 @@ import { spinner, intro, outro, text, isCancel } from '@clack/prompts';
 import { cyan, green } from 'kolorist';
 import { generateCompletion, readData } from '../helpers/completion';
 import { getConfig } from '../helpers/config';
-import { streamToIterable } from '../helpers/stream-to-iterable';
-import { ChatCompletionRequestMessage } from 'openai';
+import type { ChatCompletionMessageParam } from '../helpers/completion';
 import { projectName } from '../helpers/constants';
 import i18n from '../helpers/i18n';
 
@@ -22,7 +21,7 @@ export default command(
       API_ENDPOINT: apiEndpoint,
       MODEL: model,
     } = await getConfig();
-    const chatHistory: ChatCompletionRequestMessage[] = [];
+    const chatHistory: ChatCompletionMessageParam[] = [];
 
     console.log('');
     intro(i18n.t('Starting new conversation'));
@@ -79,7 +78,7 @@ async function getResponse({
   model,
   apiEndpoint,
 }: {
-  prompt: string | ChatCompletionRequestMessage[];
+  prompt: string | ChatCompletionMessageParam[];
   number?: number;
   model?: string;
   key: string;
@@ -93,7 +92,5 @@ async function getResponse({
     apiEndpoint,
   });
 
-  const iterableStream = streamToIterable(stream);
-
-  return { readResponse: readData(iterableStream) };
+  return { readResponse: readData(stream) };
 }

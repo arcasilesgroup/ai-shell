@@ -18,7 +18,7 @@
 
 ## Setup
 
-> The minimum supported Node.js version is v14.
+> The minimum supported Node.js version is v22.
 
 1. Install AI Shell:
 
@@ -116,6 +116,18 @@ ai config set ICONS=nerd
 - The CLI runs 100% on your machine. Prompts travel only from your terminal to the endpoint you configure.
 - No telemetry, no middle backend, no accounts.
 - Executed commands are appended to your own `.zsh_history` / `.bash_history`.
+
+## Built and maintained with ai-engineering
+
+This repository is built and maintained with [ai-engineering](https://github.com/arcasilesgroup/ai-engineering) — the governance framework for AI-assisted development by Arcasiles Group. Quality gates, security scanning, and risk management run locally through git hooks and in CI:
+
+```sh
+uv tool install ai-engineering
+ai-eng init          # this machine, and this repository if you say yes
+just check           # the exact gate CI runs
+```
+
+The rules of the house are in [CONSTITUTION.md](CONSTITUTION.md) and [AGENTS.md](AGENTS.md); release versions come from changesets and publish through CI with OIDC provenance — never from a laptop.
 
 ## Updating
 
