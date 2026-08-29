@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.2
+
+### Patch Changes
+
+- [#28](https://github.com/arcasilesgroup/ai-shell/pull/28) [`1ffee63`](https://github.com/arcasilesgroup/ai-shell/commit/1ffee636ead237aff92139b929b95e0179bb2cb9) Thanks [@soydachi](https://github.com/soydachi)! - Pin @nexssp/os to exactly 2.0.36. The caret range let npm resolve 2.1.x for fresh installs, and those tarballs are missing legacy.mjs while their exports map points at it: every `ai` invocation died with ERR_MODULE_NOT_FOUND. Verified against the published 0.1.1 from the registry.
+
 ## 0.1.1
 
 ### Patch Changes
