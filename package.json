@@ -10,7 +10,7 @@
     "@clack/core": "1.4.3",
     "@clack/prompts": "1.7.0",
     "@dqbd/tiktoken": "^1.0.22",
-    "@nexssp/os": "^2.0.36",
+    "@nexssp/os": "2.0.36",
     "axios": "^1.3.5",
     "cleye": "^2.6.0",
     "clipboardy": "^2.3.0",
